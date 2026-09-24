@@ -1,0 +1,32 @@
+# Local configuration and assistant/editor state
+.env
+.env.*
+.codex/
+.vscode/
+selector*.toml
+!selector.example.toml
+.devcontainer/devcontainer.json
+
+# Private inputs, generated results, downloaded weights, and caches
+.local-inputs/
+state/
+models/
+exports/
+results/
+*.sqlite3
+*.sqlite3-*
+*.db
+*.log
+*.pid
+*.onnx
+*.gguf
+*.download
+
+# Python build and development artifacts
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+build/
+dist/

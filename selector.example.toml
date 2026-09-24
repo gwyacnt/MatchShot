@@ -1,0 +1,54 @@
+# Public defaults: configure.py copies this to git-ignored selector.toml.
+# Edit that private copy, not this example. Environment variables come from .env
+# via the devcontainer; absolute paths and paths relative to the private file work.
+[paths]
+library = "${PHOTO_LIBRARY}"
+references = "${PHOTO_REFERENCES}"
+
+[recognition]
+threshold = 0.45
+max_side = 1280
+threads = 4
+skip_invalid_references = true
+
+[selection]
+top = 10
+minimum_score = 6.0
+# Remove near-identical shots, then softly reward variety in the top ten.
+near_duplicate_distance = 6
+diversity_bonus = 0.25
+# Optional YYYY-MM-DD cutoff. Empty includes all years. Unknown dates stay eligible.
+not_before = ""
+
+[vision]
+# Local llama.cpp + Qwen3-VL. Photos never leave this machine.
+image_size = 1008
+timeout_seconds = 180
+# Hard exclusions are assessed by the vision model before weighted ranking.
+exclude = ["The target is visibly a child rather than an adult.", "This is an ID/passport photo, a photographed document, or a collage rather than a usable profile photograph.", "The target's face is substantially obscured or not recognisable."]
+
+# Add/remove criteria freely. Descriptions define what the vision model assesses.
+# Each gets a 0–10 score and explanation. Weights define relative importance.
+[criteria.expression]
+weight = 3.0
+description = "A natural, welcoming expression: a genuine-looking smile or relaxed engaged expression. Avoid awkward grimaces or visibly forced expressions."
+
+[criteria.pose]
+weight = 2.0
+description = "Relaxed, confident-looking posture and a flattering camera angle. Judge visible pose, not personality or body type."
+
+[criteria.composition]
+weight = 2.0
+description = "An intentional, attractive composition that makes the target easy to identify, with a clean or interesting background and no awkward crop. Full-body and activity shots can score as highly as portraits."
+
+[criteria.presentation]
+weight = 1.5
+description = "Visible outfit and grooming look intentional and suit the setting. Do not reward expensive brands, luxury, or a particular body type."
+
+[criteria.story]
+weight = 1.5
+description = "The photo gives a potential date something to respond to: an activity, hobby, travel setting, or natural social moment. Do not invent interests or personality traits."
+
+[criteria.technical]
+weight = 1.0
+description = "Pleasing light and colour, useful detail, and a sharp enough subject. Avoid distracting blur, harsh shadows, or obvious heavy filters. Do not reward face size by itself."

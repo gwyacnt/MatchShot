@@ -1,0 +1,7 @@
+# The workspace is mounted by Dev Containers. Only these build inputs belong
+# in the Docker context; private config, photos, and assistant state never do.
+**
+!.devcontainer/
+.devcontainer/**
+!.devcontainer/Dockerfile
+!.devcontainer/requirements.lock

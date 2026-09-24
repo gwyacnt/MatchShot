@@ -1,0 +1,15 @@
+# Primary version list for maintainers. Docker installs requirements.lock with --no-deps.
+# Install AMD's runtime explicitly; InsightFace's default pulls the CPU-only runtime.
+https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2.1/onnxruntime_migraphx-1.23.2-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
+numpy==2.2.6
+opencv-python==4.13.0.92
+Pillow==12.3.0
+onnx==1.19.1
+scipy==1.16.3
+scikit-image==0.25.2
+tqdm==4.67.1
+requests==2.32.5
+setuptools==80.9.0
+insightface==2.0
+
+pillow-heif==1.8.0

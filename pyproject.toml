@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "photo-selector"
+version = "0.3.0"
+description = "Automatic dating-photo recommendations with configurable local visual assessment"
+requires-python = ">=3.12,<3.13"
+# The devcontainer installs the AMD runtime and InsightFace explicitly to avoid
+# InsightFace's default CPU-only onnxruntime dependency replacing MIGraphX.
+dependencies = ["numpy==2.2.6", "opencv-python==4.13.0.92", "Pillow==12.3.0", "pillow-heif==1.8.0"]
+
+[project.scripts]
+photo-selector = "photo_selector.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["photo_selector*"]
