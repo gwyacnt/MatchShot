@@ -102,12 +102,64 @@ photo-selector doctor
 photo-selector run --config selector.toml
 ```
 
-The first full run can take hours for a large library. There is no hidden candidate
-cap or preliminary top-100 sharpness filter: every readable identity match is
-assessed. Image preprocessing uses CPU; face inference uses MIGraphX and visual
-assessment uses Vulkan. Neural inference is configured for GPU execution rather
-than silent CPU fallback. The visual stage starts a local model server on loopback
-and shuts it down when that stage finishes.
+The command runs three stages in order. A large library can take hours because
+finding your face and judging the matching photos are separate jobs.
+
+1. **Find photos of you.** First the app reads your reference photos, or reuses the
+   saved references if they have not changed. It then visits every supported photo
+   in every library subfolder, detects faces, and compares them with your references.
+   It saves the best match score, face location, and information needed to recognise
+   duplicate photos. At this stage it is **not yet judging dating-profile quality**.
+   Photos with no face or no matching face are normal results, not errors.
+2. **Assess the matching photos.** After the entire face scan finishes, the local
+   vision model examines each photo whose match score meets your identity threshold.
+   It sees the whole photo and a crop identifying the matched face. It applies your
+   exclusions and gives each configured criterion a score and explanation: for
+   example, expression, pose, composition, and setting. There is no preliminary
+   top-100 quality filter: every readable identity match reaches this stage, with
+   cached assessments reused when available.
+3. **Choose and explain the top photos.** The app combines the criterion scores
+   using your weights, applies the minimum score and optional date cutoff, removes
+   duplicate candidates, and applies your variety preference. It then writes the
+   requested top photos (10 by default) and an HTML report explaining the choices.
+   If fewer qualify, it reports the shortfall.
+
+### Reading the terminal output
+
+During **stage 1**, a progress line looks like this (illustrative numbers):
+
+```text
+Processed 1250, cached 500, errors 3; 120.0s
+```
+
+| Counter | Meaning |
+| --- | --- |
+| `Processed 1250` | 1,250 files were attempted in this invocation, including the 3 failures. These are not 1,250 photos of you or 1,250 quality assessments. |
+| `cached 500` | Valid scan results for 500 unchanged files were reused from earlier work; those files did not need face detection again. |
+| `errors 3` | Processing failed for 3 of the attempted files. The file path and error are printed separately. Not finding your face does **not** count as an error. |
+| `120.0s` | Time spent in this invocation's scan loop; it excludes earlier runs and initial model loading/file enumeration. |
+
+In that example, the scan has reached **1,750 files**: `processed + cached`.
+Do not add `errors` again; they are already included in `processed`. Progress is
+printed every 25 attempted files. These counters do not tell you how many photos
+matched your face, and completion of this scan is not completion of the whole run.
+
+When the face scan finishes, the terminal prints `Scan finished` and then moves
+automatically to **stage 2**:
+
+```text
+Visual stage: 300 identity matches, 20 cached, 280 to assess
+Assessed 1/280 new photos; 8s elapsed, about 37m remaining
+```
+
+These illustrative numbers mean 300 photos matched the references, 20 already have
+usable visual assessments, and the remaining 280 need assessment. This stage's
+elapsed time and estimated time remaining are separate from the face-scan timer.
+The final `Recommended ... Open: .../index.html` message means the report is ready.
+
+All stages run locally. Image decoding/preprocessing uses CPU; the face models run
+on the AMD GPU through MIGraphX and the visual model uses Vulkan. The app starts
+and stops its own local visual-model server; you do not need to manage that server.
 
 Progress and the final `index.html` path are printed to the terminal. Open the report
 in your host browser: replace its `/state` prefix with your configured `PHOTO_STATE`
