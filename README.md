@@ -1,4 +1,4 @@
-# Photo selector
+# MatchShot
 
 Automatically scan a photo library and recommend the **top 10 photos for a dating
 profile**, using your own criteria. All photo analysis runs locally.
