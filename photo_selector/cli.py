@@ -10,6 +10,7 @@ import time
 
 import numpy as np
 
+from . import __version__
 from .core import (Engine, REVISION, atomic_json, connect, digest, download_models,
                    files_under, identity_score, normalized, phash, prepare_state, read_image)
 
@@ -113,7 +114,10 @@ def scan(args, state):
                            (str(path), stat.st_size, stat.st_mtime_ns, config, json.dumps(data), error))
             processed += 1
             if processed % 25 == 0:
-                print(f"Processed {processed}, cached {skipped}, errors {errors}; {time.monotonic()-start:.1f}s", flush=True)
+                visited = processed + skipped
+                print(f"Face scan {visited}/{len(paths)} ({100*visited/len(paths):.1f}%): "
+                      f"processed {processed}, cached {skipped}, errors {errors}; "
+                      f"{time.monotonic()-start:.1f}s", flush=True)
     finally:
         db.close()
     print(f"Scan finished: {processed} processed, {skipped} cached, {errors} errors; {len(paths)} supported files in library.")
@@ -130,6 +134,7 @@ def positive(value):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Recommend your top dating-profile photos using configurable visual criteria.")
+    parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
     parser.add_argument("--state", type=Path, default=Path(os.environ.get("PHOTO_SELECTOR_STATE", str(Path.home() / ".local/share/photo-selector-gpu"))))
     subs = parser.add_subparsers(dest="command", required=True)
     for name in ("run", "rank"):

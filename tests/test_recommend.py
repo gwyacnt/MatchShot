@@ -42,7 +42,7 @@ class RecommendationTests(unittest.TestCase):
     def test_weights_do_not_invalidate_visual_cache_but_rubric_does(self):
         cfg=config();other=deepcopy(cfg)
         other['criteria']['expression']['weight']=100
-        other['selection']['top']=3
+        other['selection'].update(top=3,max_per_day=2,min_visual_distance=20)
         self.assertEqual(assessment_signature(cfg),assessment_signature(other))
         self.assertGreater(weighted_score(assessment(cfg),other['criteria']),weighted_score(assessment(cfg),cfg['criteria']))
         other['criteria']['expression']['description']='Prefer a neutral expression'
@@ -63,7 +63,7 @@ class RecommendationTests(unittest.TestCase):
             p=root/'config.toml';p.write_text(text)
             cfg=load_config(p)
             self.assertEqual(cfg['paths']['library'],str(root/'library'))
-            for before,after in [('top = 10','top = 0'),('weight = 3.0','weight = -1'),('threshold = 0.45','threshold = nan'),('not_before = ""','not_before = 0')]:
+            for before,after in [('top = 30','top = 0'),('weight = 3.0','weight = -1'),('threshold = 0.45','threshold = nan'),('not_before = ""','not_before = 0'),('max_per_day = 1','max_per_day = -1'),('min_visual_distance = 12','min_visual_distance = 65')]:
                 p.write_text(text.replace(before,after))
                 with self.assertRaises(ValueError):load_config(p)
 
@@ -80,9 +80,65 @@ class RecommendationTests(unittest.TestCase):
         cfg['selection']['top']=10
         self.assertEqual(len(select_top(items,cfg)),2)
 
+    def test_day_limit_spreads_set_and_unknown_dates_do_not_form_one_day(self):
+        cfg=config();cfg['selection'].update(top=4, minimum_score=0,
+            near_duplicate_distance=-1, min_visual_distance=0, max_per_day=1)
+        def item(name, day, score):
+            return dict(path=name, date=day, assessment=assessment(cfg,score,score),
+                        sha256=name, phash='0', width=200, height=200)
+        items=[item('best', '2024-01-01',9), item('same-day','2024-01-01',8.9),
+               item('other-day','2024-01-02',8),item('undated-a',None,7),item('undated-b',None,6.9)]
+        selected=select_top(items,cfg)
+        self.assertEqual([i['path'] for i in selected],['best','other-day','undated-a','undated-b'])
+        self.assertEqual(items[1]['status'],'day_limit')
+        cfg['selection']['max_per_day']=0
+        self.assertIn('same-day',[i['path'] for i in select_top(items,cfg)])
+
+    def test_visual_variety_across_days_can_be_disabled(self):
+        cfg=config();cfg['selection'].update(top=3,minimum_score=0,
+            near_duplicate_distance=-1,min_visual_distance=12)
+        def item(name,day,score,phash):
+            return dict(path=name,date=day,assessment=assessment(cfg,score,score),
+                        sha256=name,phash=phash,width=200,height=200)
+        items=[item('best','2024-01-01',9,'0'),item('similar','2024-01-02',8,'ff'),
+               item('different','2024-01-03',7,'ffffffffffffffff')]
+        self.assertEqual([i['path'] for i in select_top(items,cfg)],['best','different'])
+        self.assertEqual(items[1]['status'],'visual_similarity')
+        self.assertEqual(items[1]['diversity_of'],'best')
+        cfg['selection']['min_visual_distance']=0
+        self.assertEqual(len(select_top(items,cfg)),3)
+        self.assertNotIn('diversity_of',items[1])
+
+    @patch('photo_selector.cli.Engine',Engine)
+    def test_interruption_preserves_completed_assessments_and_releases_lock(self):
+        cfg=config();cfg['selection'].update(minimum_score=0,near_duplicate_distance=-1,min_visual_distance=0)
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);state=root/'state';library=root/'photos';refs=root/'refs'
+            for folder in (state,library,refs):folder.mkdir()
+            for folder,count in ((library,3),(refs,2)):
+                for i in range(count):Image.new('RGB',(200,200),(i*50,80,120)).save(folder/f'{i}.jpg')
+            cfg['paths']=dict(library=str(library),references=str(refs))
+            calls=[]
+            class InterruptingAssessor:
+                def assess(self,item):
+                    calls.append(item['path'])
+                    if len(calls)==2:raise KeyboardInterrupt()
+                    return assessment(cfg,8,8)
+            @contextmanager
+            def fake(*args):yield InterruptingAssessor()
+            args=SimpleNamespace(config=DEFAULT,command='run',scan_only=False)
+            with patch('photo_selector.recommend.load_config',return_value=cfg),patch('photo_selector.recommend.local_assessor',fake),redirect_stdout(io.StringIO()):
+                with self.assertRaises(KeyboardInterrupt):run(args,state)
+                completed_path=calls[0]
+                args.command='rank'
+                out=run(args,state)
+            self.assertEqual(calls.count(completed_path),1)
+            self.assertEqual(len(calls),4)  # One completed, one interrupted, two on resume.
+            self.assertEqual(len(json.loads((out/'recommendations.json').read_text())),3)
+
     @patch('photo_selector.cli.Engine',Engine)
     def test_end_to_end_cache_reranking_source_preservation_and_new_files(self):
-        cfg=config();cfg['selection']['minimum_score']=0;cfg['selection']['near_duplicate_distance']=-1
+        cfg=config();cfg['selection']['minimum_score']=0;cfg['selection']['near_duplicate_distance']=-1;cfg['selection']['min_visual_distance']=0
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);library=root/'library';refs=root/'refs';state=root/'state'
             library.mkdir();refs.mkdir();state.mkdir()

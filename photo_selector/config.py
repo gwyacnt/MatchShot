@@ -20,10 +20,14 @@ def load_config(path):
     allowed = {'paths', 'recognition', 'selection', 'vision', 'criteria'}
     if set(cfg) != allowed:
         raise ValueError('Config requires exactly these sections: ' + ', '.join(sorted(allowed)))
+    # Older configs remain usable; these affect selection, never model assessments.
+    if isinstance(cfg.get('selection'), dict):
+        cfg['selection'].setdefault('max_per_day', 1)
+        cfg['selection'].setdefault('min_visual_distance', 12)
     for group, keys in {
         'paths': {'library', 'references'},
         'recognition': {'threshold', 'max_side', 'threads', 'skip_invalid_references'},
-        'selection': {'top', 'minimum_score', 'near_duplicate_distance', 'diversity_bonus', 'not_before'},
+        'selection': {'top', 'minimum_score', 'near_duplicate_distance', 'diversity_bonus', 'not_before', 'max_per_day', 'min_visual_distance'},
         'vision': {'image_size', 'timeout_seconds', 'exclude'},
     }.items():
         if not isinstance(cfg[group], dict) or set(cfg[group]) != keys:
@@ -53,6 +57,8 @@ def load_config(path):
     number('selection', 'minimum_score', 0, 10)
     number('selection', 'near_duplicate_distance', -1, 64, True)
     number('selection', 'diversity_bonus', 0, 10)
+    number('selection', 'max_per_day', 0, 100, True)
+    number('selection', 'min_visual_distance', 0, 64, True)
     if not isinstance(cfg['selection']['not_before'], str):
         raise ValueError('selection.not_before must be empty or YYYY-MM-DD')
     if cfg['selection']['not_before']:

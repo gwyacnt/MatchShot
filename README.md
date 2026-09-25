@@ -1,7 +1,7 @@
 # MatchShot
 
-Automatically scan a photo library and recommend the **top 10 photos for a dating
-profile**, using your own criteria. All photo analysis runs locally.
+Automatically scan a photo library and recommend the **best photos for a dating
+profile (30 by default)**, using your own criteria. All photo analysis runs locally.
 
 The pipeline identifies the person in your reference photos, assesses each matching
 photo's expression, pose, composition, presentation, setting, and technical quality,
@@ -121,7 +121,7 @@ finding your face and judging the matching photos are separate jobs.
 3. **Choose and explain the top photos.** The app combines the criterion scores
    using your weights, applies the minimum score and optional date cutoff, removes
    duplicate candidates, and applies your variety preference. It then writes the
-   requested top photos (10 by default) and an HTML report explaining the choices.
+   requested top photos (30 by default) and an HTML report explaining the choices.
    If fewer qualify, it reports the shortfall.
 
 ### Reading the terminal output
@@ -129,12 +129,13 @@ finding your face and judging the matching photos are separate jobs.
 During **stage 1**, a progress line looks like this (illustrative numbers):
 
 ```text
-Processed 1250, cached 500, errors 3; 120.0s
+Face scan 1750/5000 (35.0%): processed 1250, cached 500, errors 3; 120.0s
 ```
 
 | Counter | Meaning |
 | --- | --- |
-| `Processed 1250` | 1,250 files were attempted in this invocation, including the 3 failures. These are not 1,250 photos of you or 1,250 quality assessments. |
+| `Face scan 1750/5000 (35.0%)` | The scan has reached 1,750 of 5,000 supported files, including reused results and failures. This percentage covers face scanning only. |
+| `processed 1250` | 1,250 files were attempted in this invocation, including the 3 failures. These are not 1,250 photos of you or 1,250 quality assessments. |
 | `cached 500` | Valid scan results for 500 unchanged files were reused from earlier work; those files did not need face detection again. |
 | `errors 3` | Processing failed for 3 of the attempted files. The file path and error are printed separately. Not finding your face does **not** count as an error. |
 | `120.0s` | Time spent in this invocation's scan loop; it excludes earlier runs and initial model loading/file enumeration. |
@@ -178,12 +179,12 @@ photo-selector rank --config selector.toml
 
 | Change | What happens |
 | --- | --- |
-| Weights, top count, minimum score, date cutoff, variety preference | Reranks cached assessments |
+| Weights, top count, minimum score, date cutoff, day limits, visual variety | Reranks cached assessments |
 | Criterion descriptions, exclusions, visual input resolution | Reassesses matching photos, without rerunning face detection |
 | Reference photos, recognition resolution, library contents | Use `run` to refresh enrollment/scan as needed |
 | Library or reference-folder paths | Uses a separate cache for that pair of roots; use `run` |
 
-If fewer than ten photos pass the configured rules, the report explains the
+If fewer than the requested number of photos pass the configured rules, the report explains the
 shortfall instead of filling the result with rejected photos. Scores are subjective
 model assessments of the rubric, not an objective attractiveness measure or a
 prediction of dating success.
@@ -238,16 +239,42 @@ childhood photos, ID/document/collage images, and substantially obscured faces.
 
 `[selection]` controls the final set:
 
-- `top`: requested result count (default 10).
+- `top`: requested result count (default 30, configurable from 1 to 100).
 - `minimum_score`: minimum weighted score, from 0 to 10.
 - `near_duplicate_distance`: perceptual-hash tolerance. `-1` disables near-duplicate
   suppression; exact duplicate suppression remains enabled.
+- `max_per_day`: maximum recommendations from one known capture date (default 1).
+  Set to `0` to disable. Unknown dates do not get grouped into a single day.
+- `min_visual_distance`: minimum perceptual-hash distance between selected photos
+  of similar aspect ratio (default 12). This discourages similar-looking shots even
+  across different days; `0` disables it. It is stricter than duplicate removal,
+  but does not reliably recognise outfits or locations.
 - `diversity_bonus`: a small, diminishing bonus for underrepresented photo roles
   (portrait, full-body, activity, social, other). Set to `0` for score-only order.
   Roles are inferred by the model, and the bonus is a preference, not a quota.
 - `not_before`: optional `YYYY-MM-DD` cutoff, or `""` for all years. Capture dates
   come from EXIF or a complete date in the path. Unknown dates stay eligible and
   are labelled; filesystem modification time is not used as capture time.
+
+To get a broader shortlist without repeating the hours-long assessment stage:
+
+```toml
+[selection]
+# Keep the other selection settings from your private config.
+top = 30
+max_per_day = 1
+min_visual_distance = 12
+diversity_bonus = 0.75
+```
+
+Run `photo-selector rank --config selector.toml` after editing these values. Saved
+visual scores are reused. Increasing `top` alone can add more shots from the same
+session; the day limit is what prevents that. Visual variety compares whole-image
+hashes, so the same shirt in very different compositions can still appear. Dates
+can be missing or wrong, and the app does not infer dates from file modification
+time. The report shows distinct known days and the number of undated selections.
+Limits are not silently relaxed to fill the requested count; inspect `day_limit`
+and `visual_similarity` entries in `all-scores.csv` if too few photos remain.
 
 ## Results, privacy, and format support
 
@@ -326,6 +353,11 @@ python3 -m unittest discover -s tests -v
   `photo-selector doctor`. Do not install PyPI `onnxruntime` or `onnxruntime-gpu`
   over AMD's runtime. InsightFace's upstream metadata requests CPU ONNX Runtime;
   installation deliberately uses `--no-deps` to preserve the AMD provider.
+- **Visual response reaches its length limit:** the app retries with a larger response
+  budget and shorter explanations. Incomplete scores are never saved. If a run
+  still stops, completed assessments remain cached; resume the visual stage with
+  `photo-selector rank --config selector.toml`. No model downloads or face rescan
+  are needed when the inputs and recognition settings are unchanged.
 - **Visual model startup failure:** inspect `/state/vision-server.log`. The runtime
   requires Vulkan GPU 0 and sufficient free GPU memory.
 - **Unresolved path variables:** run the app inside the generated devcontainer or
@@ -338,3 +370,30 @@ container settings, input photos under `.local-inputs`, assistant/editor state,
 downloaded weights, and generated reports/caches. Only `selector.example.toml`
 is public. The Docker build context is allowlisted to the Dockerfile and locked
 requirements. Review staged files before publishing; do not force-add private data.
+
+## Release checkpoint and returning later
+
+The current release is **v0.4.0**; see [CHANGELOG.md](CHANGELOG.md). Check the running
+source version with `photo-selector --version`. To return to this exact source
+revision in a clone, use `git checkout v0.4.0` before configuring the container.
+
+Before closing the project:
+
+1. Let the command finish, or stop it with Ctrl-C. Avoid copying live SQLite files
+   while a scan or assessment is writing them.
+2. Keep a private backup of `.env`, `selector.toml`, and the **entire host directory
+   named by `PHOTO_STATE`**. This includes cached work, models, and finished reports.
+   These files are intentionally absent from Git and release archives.
+3. Keep your photo library and reference folder. They are separate from the output
+   backup and are never copied into Git by the application.
+
+To return, restore the private configuration and state directory, check that the
+input paths are correct, run `.devcontainer/configure.py` on the host, and reopen
+the container. Keeping source paths, contents, and timestamps intact allows the
+existing cache to be reused. New paths, changed references, or changed photos can
+require rescanning. Rebuilding the container does not delete the host state folder.
+
+Resume an unfinished face scan with `photo-selector run --config selector.toml`.
+If face scanning is complete, resume visual assessment or change selection rules
+with `photo-selector rank --config selector.toml`. The app does not need to remain
+running for you to open a completed HTML report.

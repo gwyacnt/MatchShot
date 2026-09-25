@@ -5,6 +5,7 @@ from contextlib import nullcontext
 import csv
 from datetime import datetime, timezone, date
 import fcntl
+import hashlib
 import html
 import json
 from pathlib import Path
@@ -55,7 +56,7 @@ def scan_inventory(project, cfg):
     library = json.loads(library_path.read_text())
     if library.get('source') != cfg['paths']['library'] or library.get('identity_digest') != digest(project/'identity.json'):
         raise ValueError('Identity/library changed. Run photo-selector run')
-    expected = __import__('hashlib').sha256(json.dumps({'identity': digest(project/'identity.json'),
+    expected = hashlib.sha256(json.dumps({'identity': digest(project/'identity.json'),
         'max_side': cfg['recognition']['max_side'], 'pipeline': 3, 'revision': REVISION}, sort_keys=True).encode()).hexdigest()
     if expected != library['config']:
         raise ValueError('Recognition settings changed. Run photo-selector run')
@@ -91,9 +92,11 @@ def weighted_score(assessment, criteria):
 
 
 def select_top(items, cfg):
-    """Higher scores choose duplicate representatives; diversity only affects ordering."""
+    """Rank a set subject to date and visual-variety limits, without new inference."""
     candidates = []
     for item in items:
+        for key in ('duplicate_of', 'diversity_of', 'rank', 'selection_score'):
+            item.pop(key, None)
         item['score'] = round(weighted_score(item['assessment'], cfg['criteria']), 4)
         item['status'] = 'eligible'
         if item['assessment']['excluded']:
@@ -118,7 +121,9 @@ def select_top(items, cfg):
         exact[item['sha256']] = item
         tree.add(int(item['phash'], 16), item)
         unique.append(item)
-    chosen, counts = [], {}
+    chosen, counts, days = [], {}, {}
+    max_per_day = cfg['selection'].get('max_per_day', 1)
+    min_visual_distance = cfg['selection'].get('min_visual_distance', 12)
     while unique and len(chosen) < cfg['selection']['top']:
         # A diminishing bonus rewards underrepresented photo roles, without quotas.
         def utility(item):
@@ -126,11 +131,24 @@ def select_top(items, cfg):
             return item['score'] + cfg['selection']['diversity_bonus']/(1+counts.get(category, 0))
         best = max(unique, key=utility)
         unique.remove(best)
+        day = best.get('date')
+        if day and max_per_day and days.get(day, 0) >= max_per_day:
+            best['status'] = 'day_limit'
+            continue
+        similar = next((other for other in chosen
+                        if min_visual_distance and
+                        abs((best['width']/best['height'])/(other['width']/other['height'])-1) < .1 and
+                        (int(best['phash'], 16)^int(other['phash'], 16)).bit_count() < min_visual_distance), None)
+        if similar is not None:
+            best['status'], best['diversity_of'] = 'visual_similarity', similar['path']
+            continue
         best['selection_score'] = round(utility(best), 4)
         best['rank'] = len(chosen)+1
         best['status'] = 'recommended'
         category = best['assessment']['category']
         counts[category] = counts.get(category, 0)+1
+        if day:
+            days[day] = days.get(day, 0)+1
         chosen.append(best)
     return chosen
 
@@ -142,9 +160,14 @@ def write_results(project, cfg, items, selected, coverage):
     report = {'config': cfg, 'coverage': coverage, 'assessment_signature': assessment_signature(cfg),
               'requested': cfg['selection']['top'], 'recommended': len(selected),
               'note': 'Model recommendations against your rubric, not an objective attractiveness score.'}
+    known_days = {item['date'] for item in selected if item.get('date')}
+    undated = sum(not item.get('date') for item in selected)
+    report['diversity'] = {'distinct_known_days': len(known_days), 'undated_photos': undated,
+                           'max_per_day': cfg['selection'].get('max_per_day', 1),
+                           'min_visual_distance': cfg['selection'].get('min_visual_distance', 12)}
     atomic_json(out/'run.json', report)
     atomic_json(out/'recommendations.json', selected)
-    fields = ['path', 'status', 'score', 'rank', 'similarity', 'date', 'date_source', 'category', 'summary', 'exclusion_reason', 'duplicate_of']
+    fields = ['path', 'status', 'score', 'rank', 'similarity', 'date', 'date_source', 'category', 'summary', 'exclusion_reason', 'duplicate_of', 'diversity_of']
     for name in cfg['criteria']:
         fields += [name+'_score', name+'_reason']
     with (out/'all-scores.csv').open('w', newline='') as stream:
@@ -176,7 +199,8 @@ def write_results(project, cfg, items, selected, coverage):
     shortfall = f'<p>Only {len(selected)} photos qualified for the requested {cfg["selection"]["top"]}. See all-scores.csv for exclusions and scores.</p>' if len(selected)<cfg['selection']['top'] else ''
     document = ('<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Your dating-photo recommendations</title>'
                 '<style>body{font:17px system-ui;background:#f4f4ef;color:#23382e;max-width:1100px;margin:40px auto;padding:20px}article{background:white;border-radius:12px;padding:24px;margin:24px 0}img{max-width:100%;max-height:700px}p{line-height:1.6}.path{overflow-wrap:anywhere;color:#526459}td,th{padding:10px;text-align:left;vertical-align:top}table{border-collapse:collapse}tr{border-bottom:1px solid #ddd}</style>'
-                f'<h1>Your top {len(selected)} dating-profile photos</h1><p>Selected automatically using your configured criteria. Scores express the local model’s assessment, not an objective measure of attractiveness. Variety can adjust the order slightly.</p>'
+                f'<h1>Your top {len(selected)} dating-profile photos</h1><p>Selected automatically using your configured criteria, day limits, and visual variety settings. Scores express the local model’s assessment, not an objective measure of attractiveness.</p>'
+                f'<p>Variety: {len(known_days)} distinct known capture days; {undated} photos with unknown dates. Unknown dates cannot be checked against the per-day limit. Visual similarity is a heuristic, not clothing recognition.</p>'
                 f'<p>Scanned {coverage["supported_images"]:,} supported photos; found {coverage["identity_matches"]:,} identity matches; '
                 f'{len(coverage["read_errors"])} unreadable files. Every readable match was assessed. Videos and unsupported formats are outside this photo scan.</p>'
                 + shortfall + ''.join(cards) + '</html>')

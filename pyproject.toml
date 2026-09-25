@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "photo-selector"
-version = "0.3.0"
+version = "0.4.0"
 description = "Automatic dating-photo recommendations with configurable local visual assessment"
 requires-python = ">=3.12,<3.13"
 # The devcontainer installs the AMD runtime and InsightFace explicitly to avoid

@@ -12,11 +12,15 @@ threads = 4
 skip_invalid_references = true
 
 [selection]
-top = 10
+top = 30
 minimum_score = 6.0
-# Remove near-identical shots, then softly reward variety in the top ten.
+# Remove near-identical shots, then spread recommendations across days and looks.
 near_duplicate_distance = 6
-diversity_bonus = 0.25
+diversity_bonus = 0.75
+# Maximum recommendations per known capture date; 0 disables the limit.
+max_per_day = 1
+# Minimum perceptual-hash distance between selected shots; 0 disables this filter.
+min_visual_distance = 12
 # Optional YYYY-MM-DD cutoff. Empty includes all years. Unknown dates stay eligible.
 not_before = ""
 

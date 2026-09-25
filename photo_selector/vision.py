@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+from copy import deepcopy
 from contextlib import contextmanager
 import io
 import json
@@ -148,15 +149,40 @@ class Assessor:
               {'type': 'image_url', 'image_url': {'url': data_url(face)}}]}],
             'temperature': 0, 'seed': 42, 'max_tokens': 1400,
             'response_format': {'type': 'json_object', 'schema': schema_for(cfg)}}
-        request = urllib.request.Request(self.endpoint + '/v1/chat/completions', data=json.dumps(payload).encode(), headers={'Content-Type': 'application/json'})
+        return self.complete(payload)
+
+    def complete(self, payload):
+        """Retry truncated output without accepting partial scores or changing the rubric.
+
+        The first request stays unchanged so existing cached assessments remain
+        valid. Recovery only changes output length/verbosity, not scoring criteria.
+        """
+        payload = deepcopy(payload)
         # No proxies: this endpoint is always a loopback child process.
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        with opener.open(request, timeout=cfg['vision']['timeout_seconds']) as response:
-            body = json.load(response)
-        choice = body['choices'][0]
-        if choice.get('finish_reason') != 'stop':
-            raise ValueError('Visual assessment was incomplete: ' + str(choice.get('finish_reason')))
-        return validate_assessment(json.loads(choice['message']['content']), cfg)
+        for budget in (1400, 2800, 4096):
+            payload['max_tokens'] = budget
+            if budget == 2800:
+                payload['messages'][0]['content'] += (
+                    ' Be concise. Give one short sentence per criterion, at most two sentences '
+                    'in the summary, and no repetition. Do not transcribe text from the photo.')
+                properties = payload['response_format']['schema']['properties']
+                properties['summary']['maxLength'] = 480
+                properties['exclusion_reason']['maxLength'] = 240
+                for criterion in properties['scores']['properties'].values():
+                    criterion['properties']['reason']['maxLength'] = 240
+            request = urllib.request.Request(self.endpoint + '/v1/chat/completions', data=json.dumps(payload).encode(), headers={'Content-Type': 'application/json'})
+            with opener.open(request, timeout=self.cfg['vision']['timeout_seconds']) as response:
+                body = json.load(response)
+            choice = body['choices'][0]
+            reason = choice.get('finish_reason')
+            if reason == 'stop':
+                return validate_assessment(json.loads(choice['message']['content']), self.cfg)
+            if reason != 'length':
+                raise ValueError('Visual assessment was incomplete: ' + str(reason))
+            if budget < 4096:
+                print('Visual response reached its length limit; retrying with more room and shorter explanations.', flush=True)
+        raise ValueError('Visual assessment still exceeded its response limit after three recovery attempts')
 
 
 @contextmanager

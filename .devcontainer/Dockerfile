@@ -12,7 +12,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 ARG USER_UID=1000
 ARG USER_GID=1000
 RUN if getent passwd ubuntu >/dev/null; then userdel -r ubuntu; fi \
-    && groupadd --gid ${USER_GID} vscode \
+    && (getent group ${USER_GID} >/dev/null || groupadd --gid ${USER_GID} vscode) \
     && useradd --uid ${USER_UID} --gid ${USER_GID} --create-home --shell /bin/bash vscode
 ENV PATH=/home/vscode/.local/bin:/opt/rocm/bin:${PATH}
 WORKDIR /workspaces/photo_selector
